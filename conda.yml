@@ -1,0 +1,10 @@
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - htslib=1.22
+  - samtools=1.22
+  - bcftools=1.22
+  - plink=1.90b6.21
+  - vcftools=0.1.16
