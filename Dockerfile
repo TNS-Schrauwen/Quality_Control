@@ -12,7 +12,7 @@ USER root
 ENV PATH="$MAMBA_ROOT_PREFIX/bin:$PATH"
 
 # Copy Scaffold_QC.sh into /home/mambauser with correct ownership
-COPY Scaffold_QC.sh /home/mambauser/Scaffold_QC.sh
+COPY Scaffold_QC_slim.sh /home/mambauser/Scaffold_QC.sh
 
 RUN chmod +x /home/mambauser/Scaffold_QC.sh && \
     ln -s /home/mambauser/Scaffold_QC.sh /usr/local/bin/Scaffold_QC.sh && \
