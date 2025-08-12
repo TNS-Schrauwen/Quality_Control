@@ -1,0 +1,96 @@
+---
+name: build-and-push-to-ecr
+kind: pipeline
+type: docker
+platform:
+  arch: arm64
+  os: linux
+
+volumes:
+  - name: docker-sock
+    host:
+      path: /var/run/docker.sock
+  - name: buildx-cache
+    host:
+      path: /tmp/buildx-cache
+  - name: shared-data
+    temp: {}
+
+steps:
+  - name: ecr-login
+    image: amazon/aws-cli:2.28.7
+    environment:
+      AWS_ACCESS_KEY_ID:
+        from_secret: aws_access_key_id
+      AWS_SECRET_ACCESS_KEY:
+        from_secret: aws_secret_access_key
+      AWS_DEFAULT_REGION: us-west-2
+      ECR_REGISTRY:
+        from_secret: ecr_registry
+      REPO_NAME:
+        from_secret: repo_name
+    volumes:
+      - name: shared-data
+        path: /shared
+    commands:
+      - |
+        aws ecr describe-repositories --repository-names $REPO_NAME 2>/dev/null || \
+          aws ecr create-repository --repository-name $REPO_NAME \
+            --image-scanning-configuration scanOnPush=true \
+            --encryption-configuration encryptionType=AES256
+      
+      - aws ecr get-login-password > /shared/ecr-token
+
+  - name: build-and-push
+    image: docker:28.3.3-cli-alpine3.22
+    environment:
+      ECR_REGISTRY:
+        from_secret: ecr_registry
+      REPO_NAME:
+        from_secret: repo_name
+      DOCKER_BUILDKIT: "1"
+      BUILDX_NO_DEFAULT_ATTESTATIONS: "1" 
+    volumes:
+      - name: docker-sock
+        path: /var/run/docker.sock
+      - name: buildx-cache
+        path: /tmp/buildx-cache
+      - name: shared-data
+        path: /shared
+    depends_on:
+      - ecr-login
+    commands:
+      - cat /shared/ecr-token | docker login --username AWS --password-stdin $ECR_REGISTRY
+      
+      - |
+        docker buildx create \
+          --driver docker-container \
+          --name multiarch \
+          --driver-opt network=host \
+          --use 2>/dev/null || docker buildx use multiarch
+
+      - |
+        if [ "$DRONE_BRANCH" = "main" ]; then
+          TAG_NAME="latest"
+        elif [ "$DRONE_BRANCH" = "dev" ]; then
+          TAG_NAME="dev"
+        else
+          TAG_NAME="$DRONE_BRANCH"
+        fi
+      
+      - |
+        docker buildx build \
+          --platform linux/amd64,linux/arm64 \
+          --cache-from type=local,src=/tmp/buildx-cache \
+          --cache-to type=local,dest=/tmp/buildx-cache-new,mode=max \
+          --tag $ECR_REGISTRY/$REPO_NAME:$TAG_NAME \
+          --push \
+          --progress=plain \
+          .
+
+trigger:
+  branch:
+    - main
+    - dev
+  event:
+    - push
